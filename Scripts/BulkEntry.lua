@@ -1,52 +1,67 @@
-local BulkEntry = {}
+require('Scripts/lib.lua')
 
-function BulkEntry:OnInit()
-    print("BulkEntry Mobile Init")
-end
+local BulkEntry = GameMain:NewMod("BookSearch")
 
 function BulkEntry:OnEnter()
-    print("BulkEntry Mobile Enter")
+    print("BookSearch OnEnter")
+
+    local Event = GameMain:GetMod("_Event")
+    if Event == nil then
+        print("_Event not found")
+        return
+    end
+
+    Event:RegisterEvent(g_emEvent.SelectItem,
+    function(evt, thing, objs)
+        self:SelectBuilding(thing)
+    end, "BookSearch")
 end
 
 function BulkEntry:SelectBuilding(thing)
     if thing == nil or thing.def == nil then return end
+
+    print("Select thing: " .. tostring(thing.def.Name))
+
     if thing.def.Name ~= "Building_BookShelf_CangJing" then return end
 
-    thing:RemoveBtnData("一键录入秘籍")
+    thing:RemoveBtnData("บันทึกคัมภีร์")
     thing:AddBtnData(
-        "一键录入秘籍",
-        "res/Sprs/ui/icon_luru01",
-        "GameMain:GetMod('BulkEntry'):OnClick(bind,0)",
-        "快速录入并清除当前地图上的全部秘籍",
+        "บันทึกคัมภีร์",
+        "res/Sprs/ui/icon_hand",
+        "GameMain:GetMod('BookSearch'):OnClick(bind,0)",
+        "บันทึกคัมภีร์ทั้งหมดบนแผนที่เข้าหอคัมภีร์",
         nil
     )
 
-    thing:RemoveBtnData("一键录入功法")
+    thing:RemoveBtnData("บันทึกวิชา")
     thing:AddBtnData(
-        "一键录入功法",
-        "res/Sprs/ui/icon_luru01",
-        "GameMain:GetMod('BulkEntry'):OnClick(bind,1)",
-        "快速录入已解锁但还未录入的全部功法",
+        "บันทึกวิชา",
+        "res/Sprs/ui/icon_hand",
+        "GameMain:GetMod('BookSearch'):OnClick(bind,1)",
+        "บันทึกวิชาที่ปลดล็อกแล้วเข้าหอคัมภีร์",
         nil
     )
 end
 
-function BulkEntry:OnClick(t, type)
-    local npc = nil
+function BulkEntry:GetWorkNpc()
+    local list = CS.XiaWorld.ThingMgr.Instance:GetThingList(g_emThingType.Npc)
+    if list == nil then return nil end
 
-    local npcs = CS.XiaWorld.ThingMgr.Instance:GetNpcs()
-    if npcs ~= nil then
-        for i = 0, npcs.Count - 1 do
-            local n = npcs[i]
-            if n ~= nil and n.IsDisciple and n.CanDoDiscipleWork and n.GongKind ~= 1 and n.GongKind ~= 2 then
-                npc = n
-                break
-            end
+    for i = 0, list.Count - 1 do
+        local npc = list[i]
+        if npc ~= nil and npc.IsDisciple and npc.CanDoDiscipleWork and npc.GongKind ~= 1 and npc.GongKind ~= 2 then
+            return npc
         end
     end
 
+    return nil
+end
+
+function BulkEntry:OnClick(t, type)
+    local npc = self:GetWorkNpc()
+
     if npc == nil then
-        CS.XiaWorld.WorldLuaHelper():ShowMsgBox("ไม่พบศิษย์ที่ใช้งานได้", "BulkEntry")
+        CS.XiaWorld.WorldLuaHelper():ShowMsgBox("ไม่พบศิษย์ที่ใช้งานได้", "BookSearch")
         return
     end
 
@@ -57,20 +72,21 @@ function BulkEntry:Execute(t, type, npc)
     local helper = CS.XiaWorld.WorldLuaHelper()
 
     if type == 0 then
-        local things = CS.XiaWorld.ThingMgr.Instance:GetThingList(2)
+        local things = CS.XiaWorld.ThingMgr.Instance:GetThingList(g_emThingType.Item)
         if things == nil then return end
 
         local full = false
+        local count = 0
 
-        for i = 0, things.Count - 1 do
+        for i = things.Count - 1, 0, -1 do
             local item = things[i]
 
             if item ~= nil and item.IsValid and item.Key ~= 0 and item.IsEsoterica and item.FreeCount > 0 then
                 local esoId = item.EsotericaID
 
                 if CS.XiaWorld.CangJingGeMgr.Instance:CheckEso(esoId) then
-                    helper:FlyLineEffect(item.Key, t.Key, 1, nil, nil, nil, nil, "Effect/System/FlyLine")
                     CS.XiaWorld.ThingMgr.Instance:RemoveThing(item, false, false)
+                    count = count + 1
                 else
                     local sysEso = CS.XiaWorld.EsotericaMgr.Instance:GetSysEsoterica(esoId, true)
                     if sysEso ~= nil then
@@ -82,8 +98,8 @@ function BulkEntry:Execute(t, type, npc)
                             end
 
                             CS.XiaWorld.CangJingGeMgr.Instance:AddEsoterica(esoId, npc)
-                            helper:FlyLineEffect(item.Key, t.Key, 1, nil, nil, nil, nil, "Effect/System/FlyLine")
                             CS.XiaWorld.ThingMgr.Instance:RemoveThing(item, false, false)
+                            count = count + 1
                         end
                     end
                 end
@@ -93,7 +109,7 @@ function BulkEntry:Execute(t, type, npc)
         if full then
             helper:ShowMsgBox("容量不足，只录入了部分秘籍。", "提示")
         else
-            helper:ShowMsgBox("录入秘籍完成。", "提示")
+            helper:ShowMsgBox("录入秘籍完成，共录入/清除 " .. tostring(count) .. " 本秘籍。", "提示")
         end
 
     else
@@ -102,6 +118,10 @@ function BulkEntry:Execute(t, type, npc)
         local full = false
 
         local gongList = CS.XiaWorld.SchoolMgr.Instance.GongList
+        if gongList == nil then
+            helper:ShowMsgBox("ไม่พบรายการ功法", "提示")
+            return
+        end
 
         for i = 0, gongList.Count - 1 do
             local gongName = gongList[i]
@@ -117,7 +137,7 @@ function BulkEntry:Execute(t, type, npc)
                     end
 
                     CS.XiaWorld.CangJingGeMgr.Instance:AddGong(gongName, npc)
-                    msg = msg .. "∟" .. gongDef.DisplayName .. "\n"
+                    msg = msg .. "∟" .. tostring(gongDef.DisplayName) .. "\n"
                 end
             end
         end
@@ -131,5 +151,3 @@ function BulkEntry:Execute(t, type, npc)
         helper:ShowMsgBox(msg, "提示")
     end
 end
-
-return BulkEntry
